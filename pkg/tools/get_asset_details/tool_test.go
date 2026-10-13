@@ -60,6 +60,46 @@ func TestGetAssetDetails(t *testing.T) {
 	}
 }
 
+func TestGetAssetDetailsReturnsTags(t *testing.T) {
+	assetId, _ := uuid.NewUUID()
+	var sentQuery string
+
+	handler := http.NewServeMux()
+	handler.Handle("/graphql/knowledgeGraph/v1", testutil.JsonHandlerInOut(func(httpRequest *http.Request, request clients.Request) (int, clients.Response) {
+		sentQuery = request.Query
+		return http.StatusOK, clients.Response{
+			Data: &clients.AssetQueryData{
+				Assets: []clients.Asset{
+					{
+						ID:          assetId.String(),
+						DisplayName: "My Asset Name",
+						Tags:        []clients.Tag{{ID: "tag-1", Name: "MCP"}},
+					},
+				},
+			},
+		}
+	}))
+	handler.Handle("/rest/2.0/responsibilities", testutil.JsonHandlerOut(func(r *http.Request) (int, clients.ResponsibilityPagedResponse) {
+		return http.StatusOK, clients.ResponsibilityPagedResponse{Limit: 100}
+	}))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	output, err := tools.NewTool(testutil.NewClient(server), false).Handler(t.Context(), tools.Input{
+		AssetID: assetId.String(),
+	})
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !strings.Contains(sentQuery, "tags(limit:") {
+		t.Errorf("tags selected without an explicit limit, will truncate at 10:\n%s", sentQuery)
+	}
+	if len(output.Asset.Tags) != 1 || output.Asset.Tags[0].Name != "MCP" {
+		t.Fatalf("Expected one tag named MCP, got: %+v", output.Asset.Tags)
+	}
+}
+
 func TestGetAssetDetailsWithResponsibilities(t *testing.T) {
 	assetId, _ := uuid.NewUUID()
 	domainId := "domain-123"
@@ -336,5 +376,57 @@ func TestGetAssetDetailsSurfacesEmptyAssignableAttribute(t *testing.T) {
 	}
 	if !note.IsSet {
 		t.Errorf("Note has a value and should be isSet=true")
+	}
+}
+
+// TestGetAssetDetailsReturnsMultiValueAttributes: a Multiple Selection attribute
+// with several selected values must be requested in the query, returned with all
+// its values, and reported as isSet=true in assignableAttributes.
+func TestGetAssetDetailsReturnsMultiValueAttributes(t *testing.T) {
+	assetId, _ := uuid.NewUUID()
+	var sentQuery string
+	handler := http.NewServeMux()
+	handler.Handle("/graphql/knowledgeGraph/v1", testutil.JsonHandlerInOut(func(_ *http.Request, request clients.Request) (int, clients.Response) {
+		sentQuery = request.Query
+		return http.StatusOK, clients.Response{
+			Data: &clients.AssetQueryData{
+				Assets: []clients.Asset{{
+					ID:          assetId.String(),
+					DisplayName: "My Asset Name",
+					MultiValueAttributes: []clients.MultiValueAttribute{
+						{StringValues: "Public;Internal;Restricted", Type: &clients.AttributeType{Name: "Confidentiality"}},
+					},
+				}},
+			},
+		}
+	}))
+	handler.Handle("/rest/2.0/responsibilities", testutil.JsonHandlerOut(func(*http.Request) (int, clients.ResponsibilityPagedResponse) {
+		return http.StatusOK, clients.ResponsibilityPagedResponse{Limit: 100}
+	}))
+	handler.HandleFunc("GET /rest/2.0/assignments/asset/"+assetId.String(), func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"id": "assignment-effective",
+			"assetType": {"id": "t", "name": "Table"},
+			"assignedCharacteristicTypeReferences": [
+				{"id": "c1", "minimumOccurrences": 0, "assignedResourceReference": {"id": "conf", "name": "Confidentiality", "resourceDiscriminator": "MultiValueListAttributeType"}}
+			]
+		}`))
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	output, err := tools.NewTool(testutil.NewClient(server), false).Handler(t.Context(), tools.Input{AssetID: assetId.String()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(sentQuery, "multiValueAttributes(limit:") || !strings.Contains(sentQuery, "stringValues") {
+		t.Errorf("multiValueAttributes with stringValues not requested:\n%s", sentQuery)
+	}
+	if len(output.Asset.MultiValueAttributes) != 1 || output.Asset.MultiValueAttributes[0].StringValues != "Public;Internal;Restricted" {
+		t.Fatalf("expected one multi-value attribute with all three values, got: %+v", output.Asset.MultiValueAttributes)
+	}
+	if len(output.AssignableAttributes) != 1 || !output.AssignableAttributes[0].IsSet {
+		t.Errorf("Confidentiality has values and should be isSet=true, got: %+v", output.AssignableAttributes)
 	}
 }

@@ -55,7 +55,7 @@ func NewTool(collibraClient *http.Client, contextSpecsEnabled bool) *chip.Tool[I
 	return &chip.Tool[Input, Output]{
 		Name:        "get_asset_details",
 		Title:       "Get Asset Details",
-		Description: "Get detailed information about a specific asset by its UUID, including attributes, relations, responsibilities (owners, stewards, and other role assignments), and metadata. Also returns assignableAttributes: every attribute type the asset can hold, with required and isSet flags — use this to tell an empty-but-settable attribute (e.g. an unset Definition) apart from one that isn't valid for the asset. Returns up to 100 attributes per type and supports cursor-based pagination for relations (50 per page). Attributes and relations here carry display names only — for an attribute or relation type's UUID or publicId, call prepare_create_asset (attributeSchema[]/relationTypes[]). Optionally executes a Context Specification against the asset and returns the generated YAML context (requires the context-specifications experimental feature).",
+		Description: "Get detailed information about a specific asset by its UUID, including attributes, relations, tags, responsibilities (owners, stewards, and other role assignments), and metadata. Also returns assignableAttributes: every attribute type the asset can hold, with required and isSet flags — use this to tell an empty-but-settable attribute (e.g. an unset Definition) apart from one that isn't valid for the asset. Returns up to 100 attributes per type and supports cursor-based pagination for relations (50 per page). Attributes and relations here carry display names only — for an attribute or relation type's UUID or publicId, call prepare_create_asset (attributeSchema[]/relationTypes[]). Optionally executes a Context Specification against the asset and returns the generated YAML context (requires the context-specifications experimental feature).",
 		Handler:     handler(collibraClient, contextSpecsEnabled),
 		Permissions: []string{},
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: chip.Ptr(false), IdempotentHint: true, OpenWorldHint: chip.Ptr(false)},
@@ -97,12 +97,6 @@ func handler(collibraClient *http.Client, contextSpecsEnabled bool) chip.ToolHan
 		// Best-effort: surface the full assignable-attribute schema (incl. empty ones).
 		assignable := resolveAssignableAttributes(ctx, collibraClient, assetUUID.String(), &assets[0])
 
-		// Best-effort: fetch values for multi-value (selection) attributes via REST,
-		// since Collibra's GQL schema does not expose a scalar value field on MultiValueAttribute.
-		if len(assets[0].MultiValueAttributes) > 0 {
-			enrichMultiValueAttributes(ctx, collibraClient, assetUUID.String(), &assets[0])
-		}
-
 		output := Output{
 			Asset:                  &assets[0],
 			AssignableAttributes:   assignable,
@@ -128,31 +122,6 @@ func handler(collibraClient *http.Client, contextSpecsEnabled bool) chip.ToolHan
 		}
 
 		return output, nil
-	}
-}
-
-// enrichMultiValueAttributes populates the Value field on each MultiValueAttribute
-// using the REST /attributes endpoint, since Collibra's GQL schema has no scalar
-// value field on MultiValueAttribute. Called only when the asset has multi-value
-// attributes; failures are logged and silently skipped.
-func enrichMultiValueAttributes(ctx context.Context, collibraClient *http.Client, assetID string, asset *clients.Asset) {
-	instances, err := clients.ListAttributesForAsset(ctx, collibraClient, assetID)
-	if err != nil {
-		slog.WarnContext(ctx, fmt.Sprintf("Failed to fetch multi-value attribute values: %s", err.Error()))
-		return
-	}
-	byName := make(map[string]string, len(instances))
-	for _, inst := range instances {
-		byName[strings.ToLower(strings.TrimSpace(inst.Type.Name))] = inst.Value
-	}
-	for i := range asset.MultiValueAttributes {
-		if asset.MultiValueAttributes[i].Type == nil {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(asset.MultiValueAttributes[i].Type.Name))
-		if v, ok := byName[key]; ok {
-			asset.MultiValueAttributes[i].Value = v
-		}
 	}
 }
 

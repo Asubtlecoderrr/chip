@@ -8,6 +8,7 @@ import (
 const (
 	AttributesLimit = 100
 	RelationsLimit  = 50
+	TagsLimit       = 100
 )
 
 func CreateAssetDetailsGraphQLQuery(
@@ -19,10 +20,11 @@ func CreateAssetDetailsGraphQLQuery(
 		"assetIds":        assetIds,
 		"attributesLimit": AttributesLimit,
 		"relationsLimit":  RelationsLimit,
+		"tagsLimit":       TagsLimit,
 	}
 
 	// Build query parameters list
-	queryParams := "$assetIds: [UUID!]!, $attributesLimit: Int!, $relationsLimit: Int!"
+	queryParams := "$assetIds: [UUID!]!, $attributesLimit: Int!, $relationsLimit: Int!, $tagsLimit: Int!"
 
 	// Build outgoing relations clause
 	outgoingClause := "outgoingRelations(order: { id: asc }, limit: $relationsLimit)"
@@ -54,6 +56,10 @@ query GetAssetDetails(%s) {
     status {
       name
     }
+    tags(limit: $tagsLimit) {
+      id
+      name
+    }
     stringAttributes(limit: $attributesLimit) {
       stringValue
       type {
@@ -79,6 +85,7 @@ query GetAssetDetails(%s) {
       }
     }
     multiValueAttributes(limit: $attributesLimit) {
+      stringValues
       type {
         name
       }
@@ -169,6 +176,12 @@ type Asset struct {
 	MultiValueAttributes []MultiValueAttribute `json:"multiValueAttributes,omitempty"`
 	OutgoingRelations    []OutgoingRelation    `json:"outgoingRelations,omitempty"`
 	IncomingRelations    []IncomingRelation    `json:"incomingRelations,omitempty"`
+	Tags                 []Tag                 `json:"tags,omitempty"`
+}
+
+type Tag struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type AssetType struct {
@@ -203,9 +216,11 @@ type DateAttribute struct {
 	Type  *AttributeType `json:"type,omitempty"`
 }
 
+// MultiValueAttribute is a multiple-selection attribute. StringValues holds
+// the selected values as a semicolon-separated string (e.g. "optionA;optionB").
 type MultiValueAttribute struct {
-	Value string         `json:"value,omitempty"`
-	Type  *AttributeType `json:"type,omitempty"`
+	StringValues string         `json:"stringValues"`
+	Type         *AttributeType `json:"type,omitempty"`
 }
 
 type AttributeType struct {

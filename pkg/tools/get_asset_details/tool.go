@@ -78,6 +78,8 @@ func handler(collibraClient *http.Client, contextSpecsEnabled bool) chip.ToolHan
 			return Output{Error: "Asset not found", Found: false}, nil
 		}
 
+		foldMultiValueAttributes(&assets[0])
+
 		collibraHost, ok := chip.GetCollibraHost(ctx)
 		if !ok {
 			slog.WarnContext(ctx, "Collibra instance URL unknown, links will be rendered without host")
@@ -125,6 +127,21 @@ func handler(collibraClient *http.Client, contextSpecsEnabled bool) chip.ToolHan
 	}
 }
 
+// foldMultiValueAttributes presents multiple-selection attributes the same way as
+// single-select attributes that allow several values: one string attribute per
+// selected value, instead of a separate list with a delimiter-joined string.
+// The GraphQL API returns the selected values as one semicolon-separated string.
+func foldMultiValueAttributes(asset *clients.Asset) {
+	for _, mv := range asset.MultiValueAttributes {
+		for _, value := range strings.Split(mv.StringValues, ";") {
+			if value = strings.TrimSpace(value); value != "" {
+				asset.StringAttributes = append(asset.StringAttributes, clients.StringAttribute{Value: value, Type: mv.Type})
+			}
+		}
+	}
+	asset.MultiValueAttributes = nil
+}
+
 // resolveAssignableAttributes returns the asset's full attribute schema from its
 // effective assignment, flagging which attributes already have a value. Returns
 // nil (and logs) on error — it must never fail the read.
@@ -152,9 +169,6 @@ func resolveAssignableAttributes(ctx context.Context, collibraClient *http.Clien
 	}
 	for i := range asset.DateAttributes {
 		addName(asset.DateAttributes[i].Type)
-	}
-	for i := range asset.MultiValueAttributes {
-		addName(asset.MultiValueAttributes[i].Type)
 	}
 
 	result := make([]AssignableAttribute, 0, len(assignment.AttributeTypes))

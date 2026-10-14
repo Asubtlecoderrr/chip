@@ -380,8 +380,9 @@ func TestGetAssetDetailsSurfacesEmptyAssignableAttribute(t *testing.T) {
 }
 
 // TestGetAssetDetailsReturnsMultiValueAttributes: a Multiple Selection attribute
-// with several selected values must be requested in the query, returned with all
-// its values, and reported as isSet=true in assignableAttributes.
+// with several selected values must be requested in the query and returned like a
+// single-select attribute with several values (one string attribute per value),
+// and reported as isSet=true in assignableAttributes.
 func TestGetAssetDetailsReturnsMultiValueAttributes(t *testing.T) {
 	assetId, _ := uuid.NewUUID()
 	var sentQuery string
@@ -393,6 +394,9 @@ func TestGetAssetDetailsReturnsMultiValueAttributes(t *testing.T) {
 				Assets: []clients.Asset{{
 					ID:          assetId.String(),
 					DisplayName: "My Asset Name",
+					StringAttributes: []clients.StringAttribute{
+						{Value: "a note", Type: &clients.AttributeType{Name: "Note"}},
+					},
 					MultiValueAttributes: []clients.MultiValueAttribute{
 						{StringValues: "Public;Internal;Restricted", Type: &clients.AttributeType{Name: "Confidentiality"}},
 					},
@@ -423,8 +427,20 @@ func TestGetAssetDetailsReturnsMultiValueAttributes(t *testing.T) {
 	if !strings.Contains(sentQuery, "multiValueAttributes(limit:") || !strings.Contains(sentQuery, "stringValues") {
 		t.Errorf("multiValueAttributes with stringValues not requested:\n%s", sentQuery)
 	}
-	if len(output.Asset.MultiValueAttributes) != 1 || output.Asset.MultiValueAttributes[0].StringValues != "Public;Internal;Restricted" {
-		t.Fatalf("expected one multi-value attribute with all three values, got: %+v", output.Asset.MultiValueAttributes)
+	var confidentiality []string
+	for _, a := range output.Asset.StringAttributes {
+		if a.Type != nil && a.Type.Name == "Confidentiality" {
+			confidentiality = append(confidentiality, a.Value)
+		}
+	}
+	if got := strings.Join(confidentiality, "|"); got != "Public|Internal|Restricted" {
+		t.Fatalf("expected one string attribute per selected value, got: %q (all: %+v)", got, output.Asset.StringAttributes)
+	}
+	if len(output.Asset.StringAttributes) != 4 {
+		t.Errorf("existing string attributes must be kept, got: %+v", output.Asset.StringAttributes)
+	}
+	if output.Asset.MultiValueAttributes != nil {
+		t.Errorf("multiValueAttributes must not be exposed separately, got: %+v", output.Asset.MultiValueAttributes)
 	}
 	if len(output.AssignableAttributes) != 1 || !output.AssignableAttributes[0].IsSet {
 		t.Errorf("Confidentiality has values and should be isSet=true, got: %+v", output.AssignableAttributes)

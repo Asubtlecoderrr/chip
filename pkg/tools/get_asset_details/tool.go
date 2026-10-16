@@ -133,13 +133,35 @@ func handler(collibraClient *http.Client, contextSpecsEnabled bool) chip.ToolHan
 // The GraphQL API returns the selected values as one semicolon-separated string.
 func foldMultiValueAttributes(asset *clients.Asset) {
 	for _, mv := range asset.MultiValueAttributes {
-		for _, value := range strings.Split(mv.StringValues, ";") {
+		for _, value := range splitMultiValue(mv.StringValues) {
 			if value = strings.TrimSpace(value); value != "" {
 				asset.StringAttributes = append(asset.StringAttributes, clients.StringAttribute{Value: value, Type: mv.Type})
 			}
 		}
 	}
 	asset.MultiValueAttributes = nil
+}
+
+// splitMultiValue splits the semicolon-separated text DGC returns for a
+// multiple-selection attribute. A semicolon inside a value is escaped as `\;`,
+// so only unescaped semicolons separate values (the same rule as DGC's
+// CsvUtility.csvToList), and `\;` is turned back into `;`.
+func splitMultiValue(s string) []string {
+	var values []string
+	var current strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\\' && i+1 < len(s) && s[i+1] == ';':
+			current.WriteByte(';')
+			i++
+		case s[i] == ';':
+			values = append(values, current.String())
+			current.Reset()
+		default:
+			current.WriteByte(s[i])
+		}
+	}
+	return append(values, current.String())
 }
 
 // resolveAssignableAttributes returns the asset's full attribute schema from its
